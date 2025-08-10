@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cursos Fysa</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-kE1qYxR5h1dToPsw4hCczSBqkT6n3a4YuTGkaqr6w7sx2fRzK8v3fL2a2oCq2uB8tbdYkq+JQ3Ehk9q1G8B8Vw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Sin atributo integrity para evitar bloqueo por SRI en GitHub Pages si cambia el hash -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root{--bg:#f6f7fb;--card:#fff;--line:#ddd;--muted:#666}
     *{box-sizing:border-box}
@@ -28,10 +29,13 @@
     .adult{background:#ffe6e6;color:#b30000;font-weight:bold}
     .pagination{margin:12px 0;text-align:center}
     .pagination button{margin:0 4px;padding:4px 10px}
+    #error{display:none;margin:12px 0;padding:10px;border:1px solid #e99;background:#fee;color:#900;border-radius:8px}
   </style>
 </head>
 <body>
   <h1>Cursos Fysa</h1>
+
+  <div id="error"></div>
 
   <!-- Paginación superior: solo anterior/siguiente -->
   <div class="panel">
@@ -68,6 +72,17 @@
 (function(){
   let allData=[], currentPage=1;
 
+  function showError(msg){
+    const box=document.getElementById('error');
+    box.textContent=msg;
+    box.style.display='block';
+    console.error(msg);
+  }
+
+  if(typeof Papa==='undefined'){
+    showError('No se pudo cargar la librería para leer CSV (PapaParse). Revisa tu conexión o desactiva bloqueadores y refresca.');
+  }
+
   const adultPatterns=[/porn|sex|xxx|xvideos|redtube|xnxx|pornhub|youporn|hentai/i];
 
   function getHostFromUrl(url){
@@ -83,17 +98,6 @@
     const off=parseFloat(document.getElementById('tzOffset').value||'0')||0;
     const d=raw?new Date(raw):new Date();
     return new Date(d.getTime()+off*3600000);
-  }
-
-  function describe(host){
-    const s=(host||'').toLowerCase();
-    if(s.includes('tinder')) return 'Citas';
-    if(s.includes('facebook')) return 'Red social';
-    if(s.includes('instagram')) return 'Fotos';
-    if(s.includes('twitter')||s==='x.com') return 'Red social';
-    if(s.includes('youtube')) return 'Vídeos';
-    if(s.includes('netflix')) return 'Streaming';
-    return 'Sitio web';
   }
 
   function matchesFilters(row){
@@ -162,7 +166,7 @@
         <td class="domain-cell">${favicon(r.host)}<span title="${r.display}">${r.display}</span></td>
         <td>${r.device}</td>
         ${showIP?`<td>${r.ip}</td>`:''}
-        ${showDesc?`<td>${describe(r.host)}</td>`:''}
+        ${showDesc?`<td>${r.desc}</td>`:''}
         <td style="text-align:center"><button onclick="toggleContext(event,${r._idx})">🕵️</button></td>
       </tr>`;
     });
@@ -197,6 +201,7 @@
   // Cargar CSV
   document.getElementById('fileInput').addEventListener('change', (e)=>{
     const f=e.target.files[0]; if(!f) return;
+    if(typeof Papa==='undefined'){ showError('PapaParse no está disponible, no puedo leer CSV.'); return; }
     allData=[]; currentPage=1;
     Papa.parse(f,{
       header:true, skipEmptyLines:true,
@@ -209,9 +214,17 @@
         const device=(d.device_name||d.device||d.device_model||'').toString().trim();
         const ip=(d.client_ip||d.ip||'').toString().trim();
         const ts=parseTS(d.timestamp||d.time||d.date||d.timeStamp);
+        const desc=(()=>{
+          const s=(host||'').toLowerCase();
+          if(s.includes('tinder')) return 'Citas'; if(s.includes('facebook')) return 'Red social';
+          if(s.includes('instagram')) return 'Fotos'; if(s.includes('twitter')||s==='x.com') return 'Red social';
+          if(s.includes('youtube')) return 'Vídeos'; if(s.includes('netflix')) return 'Streaming';
+          return 'Sitio web';
+        })();
 
-        allData.push({_idx:allData.length, display, host, device, ip, ts});
+        allData.push({_idx:allData.length, display, host, device, ip, ts, desc});
       },
+      error: (err)=> showError('Error leyendo el CSV: '+(err && err.message? err.message : String(err))),
       complete: ()=> renderTable()
     });
   });
