@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Cursos Fysa</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    body{font-family:sans-serif;padding:20px;background:#f4f4f4}
+    h1{text-align:center;margin-top:0}
+    table{width:100%;border-collapse:collapse;margin-top:20px}
+    th,td{padding:8px;border:1px solid #ccc;text-align:left}
+    th{background:#eee}
+    .favicon{width:16px;height:16px;margin-right:5px;vertical-align:middle}
+    .filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}
+    select,input[type=datetime-local],input[type=text],input[type=number]{padding:4px}
+    .toggle{display:flex;align-items:center;gap:4px}
+    button{padding:6px 12px;cursor:pointer}
+    .context-row{background:#fff8dc;font-size:.9em}
+    .adult{background:#ffe6e6;color:#b30000;font-weight:bold}
+    .domain-cell{display:flex;align-items:center;gap:6px}
+    .pagination{margin-top:10px;text-align:center}
+    .pagination button{margin:0 4px;padding:4px 8px;cursor:pointer}
+  </style>
+</head>
+<body>
+  <h1>Cursos Fysa</h1>
+  <div class="filters">
+    <input type="file" id="fileInput" accept=".csv">
+    <label>Desde:<input type="datetime-local" id="startTime"></label>
+    <label>Hasta:<input type="datetime-local" id="endTime"></label>
+    <label>Dominio:<input type="text" id="domainFilter" placeholder="filtro dominio"></label>
+    <label>Dispositivo:<input type="text" id="deviceFilter" placeholder="filtro dispositivo"></label>
+    <label>Entradas:<select id="pageSize"><option>50</option><option>100</option><option>300</option><option selected>500</option><option>1000</option></select></label>
+    <label>Ajuste horario (h):<input type="number" id="tzOffset" value="0"></label>
+    <span class="toggle"><input type="checkbox" id="showIP"><label>Ver IP</label></span>
+    <span class="toggle"><input type="checkbox" id="descToggle"><label>Descripción</label>
+      <select id="descMode"><option value="basic">Básica</option><option value="contextual">Contextual</option></select>
+    </span>
+    <button id="filterBtn">Filtrar</button>
+  </div>
+  <table id="logTable"></table>
+  <div class="pagination" id="pagination"></div>
+<script>
+let allData=[], currentPage=1;
+const adultPatterns=[/porn|sex|xxx|xvideos|redtube|xnxx|pornhub|youporn|hentai/i];
+function favicon(domain){
+  const base=domain.replace(/^www\./,'').split('/')[0];
+  return `<img class="favicon" src="https://www.google.com/s2/favicons?domain=${base}">`;
+}
+function describeDomain(domain,ctx){
+  const basic={youtube:"Vídeos",tiktok:"Vídeos cortos",twitter:"Red social",instagram:"Fotos",facebook:"Red social",netflix:"Streaming",disney:"Disney+",amazon:"Compras"};
+  for(const k in basic){if(domain.includes(k))return basic[k];}
+  if(ctx&&ctx.includes("tiktok"))return"Accedido desde TikTok";
+  return"Sitio web";
+}
+function parseTS(raw){
+  const offset=document.getElementById('tzOffset')?.valueAsNumber||0;
+  return new Date(new Date(raw).getTime() + offset*60*60*1000);
+}
+function matchesFilters(row){
+  const st=document.getElementById('startTime').valueAsNumber;
+  const et=document.getElementById('endTime').valueAsNumber;
+  const df=document.getElementById('domainFilter').value.toLowerCase();
+  const devf=document.getElementById('deviceFilter').value.toLowerCase();
+  const t=row.ts.getTime();
+  if(st&&t<st)return false;
+  if(et&&t>et)return false;
+  if(df&&!row.domain.toLowerCase().includes(df))return false;
+  if(devf&&!row.device.toLowerCase().includes(devf))return false;
+  return true;
+}
+function paginateData(data,page,size){
+  const start=(page-1)*size;
+  return data.slice(start,start+size);
+}
+function renderPagination(total,size){
+  const pages=Math.ceil(total/size);
+  let html='';
+  for(let i=1;i<=pages;i++){
+    html+=`<button onclick="gotoPage(${i})"${i===currentPage?' style="background:#007bff;color:white"':''}>${i}</button>`;
+  }
+  document.getElementById('pagination').innerHTML=html;
+}
+function renderTable(){
+  const showIP=document.getElementById('showIP').checked;
+  const showDesc=document.getElementById('descToggle').checked;
+  const mode=document.getElementById('descMode').value;
+  const size=parseInt(document.getElementById('pageSize').value)||500;
+  const filtered=allData.filter(matchesFilters);
+  const paginated=paginateData(filtered,currentPage,size);
+  renderPagination(filtered.length,size);
+  let html=`<tr><th>Hora</th><th>Dominio</th><th>Dispositivo</th>${showIP?'<th>IP</th>':''}${showDesc?'<th>Descripción</th>':''}<th>▶︎</th></tr>`;
+  paginated.forEach(row=>{
+    const adult=adultPatterns.some(p=>p.test(row.domain));
+    const desc=showDesc?describeDomain(row.domain,row.ctx):'';
+    html+=`<tr data-idx="${row._idx}" class="${adult?'adult':''}">
+      <td>${row.ts.toLocaleString()}</td>
+      <td class="domain-cell">${favicon(row.domain)}${row.domain}</td>
+      <td>${row.device}</td>
+      ${showIP?`<td>${row.ip}</td>`:''}
+      ${showDesc?`<td>${desc}</td>`:''}
+      <td style="text-align:center"><button onclick="toggleContext(event,${row._idx})">🕵️</button></td>
+    </tr>`;
+  });
+  document.getElementById('logTable').innerHTML=html;
+}
+function toggleContext(e,idx){
+  e.stopPropagation();
+  const table=document.getElementById('logTable');
+  const rows=Array.from(table.rows);
+  const rowIndex=rows.findIndex(r=>r.dataset.idx==idx);
+  if(rowIndex===-1)return;
+  const next=rows[rowIndex+1];
+  if(next&&next.classList.contains('context-row')){next.remove();return;}
+  const start=Math.max(0,idx-50);
+  const end=Math.min(allData.length,idx+51);
+  const slice=allData.slice(start,end);
+  let ctxHTML='<tr class="context-row"><td colspan="100%">';
+  slice.forEach(r=>{ctxHTML+=`${r.ts.toLocaleString()} - ${r.domain}<br>`;});
+  ctxHTML+='</td></tr>';
+  rows[rowIndex].insertAdjacentHTML('afterend',ctxHTML);
+}
+function gotoPage(n){currentPage=n;renderTable();}
+document.getElementById('filterBtn').addEventListener('click',()=>{currentPage=1;renderTable()});
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const f=e.target.files[0];if(!f)return;allData=[];
+  Papa.parse(f,{header:true,skipEmptyLines:true,step:res=>{
+    const d=res.data;allData.push({
+      _idx:allData.length,
+      ts:parseTS(d.timestamp||d.time||d.date||d.timeStamp),
+      domain:(d.root_domain||d.domain||'').trim(),
+      device:(d.device_name||d.device_model||'').trim(),
+      ip:(d.client_ip||d.ip||'').trim(),
+      ctx:(d.root_domain||'').toLowerCase()
+    });
+  },complete:()=>{currentPage=1;renderTable();}});
+});
+</script>
+</body>
+</html>
