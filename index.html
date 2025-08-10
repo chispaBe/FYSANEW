@@ -1,140 +1,220 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cursos Fysa</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-kE1qYxR5h1dToPsw4hCczSBqkT6n3a4YuTGkaqr6w7sx2fRzK8v3fL2a2oCq2uB8tbdYkq+JQ3Ehk9q1G8B8Vw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
-    body{font-family:sans-serif;padding:20px;background:#f4f4f4}
-    h1{text-align:center;margin-top:0}
-    table{width:100%;border-collapse:collapse;margin-top:20px}
-    th,td{padding:8px;border:1px solid #ccc;text-align:left}
-    th{background:#eee}
-    .favicon{width:16px;height:16px;margin-right:5px;vertical-align:middle}
-    .filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px}
-    select,input[type=datetime-local],input[type=text],input[type=number]{padding:4px}
-    .toggle{display:flex;align-items:center;gap:4px}
+    :root{--bg:#f6f7fb;--card:#fff;--line:#ddd;--muted:#666}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);margin:0;padding:24px}
+    h1{margin:0 0 12px;text-align:center}
+    .panel{background:var(--card);padding:12px;border:1px solid var(--line);border-radius:10px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .pager{display:flex;gap:10px;align-items:center}
+    .pager button{padding:6px 10px;cursor:pointer}
+    .muted{color:var(--muted)}
+    .filters{margin:12px 0}
+    label{display:flex;gap:6px;align-items:center}
+    input[type="text"],input[type="number"],input[type="datetime-local"],select{padding:6px}
     button{padding:6px 12px;cursor:pointer}
+    table{width:100%;border-collapse:collapse;background:#fff}
+    th,td{border:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+    th{background:#f0f0f0}
+    .domain-cell{display:flex;align-items:center;gap:6px}
+    .favicon{width:16px;height:16px}
     .context-row{background:#fff8dc;font-size:.9em}
     .adult{background:#ffe6e6;color:#b30000;font-weight:bold}
-    .domain-cell{display:flex;align-items:center;gap:6px}
-    .pagination{margin-top:10px;text-align:center}
-    .pagination button{margin:0 4px;padding:4px 8px;cursor:pointer}
+    .pagination{margin:12px 0;text-align:center}
+    .pagination button{margin:0 4px;padding:4px 10px}
   </style>
 </head>
 <body>
   <h1>Cursos Fysa</h1>
-  <div class="filters">
-    <input type="file" id="fileInput" accept=".csv">
-    <label>Desde:<input type="datetime-local" id="startTime"></label>
-    <label>Hasta:<input type="datetime-local" id="endTime"></label>
-    <label>Dominio:<input type="text" id="domainFilter" placeholder="filtro dominio"></label>
-    <label>Dispositivo:<input type="text" id="deviceFilter" placeholder="filtro dispositivo"></label>
-    <label>Entradas:<select id="pageSize"><option>50</option><option>100</option><option>300</option><option selected>500</option><option>1000</option></select></label>
-    <label>Ajuste horario (h):<input type="number" id="tzOffset" value="0"></label>
-    <span class="toggle"><input type="checkbox" id="showIP"><label>Ver IP</label></span>
-    <span class="toggle"><input type="checkbox" id="descToggle"><label>Descripción</label>
-      <select id="descMode"><option value="basic">Básica</option><option value="contextual">Contextual</option></select>
-    </span>
-    <button id="filterBtn">Filtrar</button>
+
+  <!-- Paginación superior: solo anterior/siguiente -->
+  <div class="panel">
+    <div id="paginationTop" class="row pager"></div>
   </div>
-  <table id="logTable"></table>
-  <div class="pagination" id="pagination"></div>
+
+  <div class="panel">
+    <div id="filtersBox" class="row filters">
+      <input type="file" id="fileInput" accept=".csv">
+      <label>Desde: <input type="datetime-local" id="startTime"></label>
+      <label>Hasta: <input type="datetime-local" id="endTime"></label>
+      <label>Dominio/URL: <input type="text" id="domainFilter" placeholder="filtro"></label>
+      <label>Dispositivo: <input type="text" id="deviceFilter" placeholder="filtro dispositivo"></label>
+      <label>Entradas:
+        <select id="pageSize">
+          <option>50</option><option>100</option><option>300</option><option selected>500</option><option>1000</option>
+        </select>
+      </label>
+      <label>Ajuste horario (h): <input type="number" id="tzOffset" value="0" step="1"></label>
+      <label><input type="checkbox" id="showIP"> Ver IP</label>
+      <label><input type="checkbox" id="descToggle"> Descripción</label>
+      <button id="filterBtn" title="Aplicar filtros">Filtrar</button>
+    </div>
+
+    <table id="logTable"></table>
+  </div>
+
+  <!-- Paginación inferior numérica -->
+  <div class="panel">
+    <div id="paginationBottom" class="pagination"></div>
+  </div>
+
 <script>
-let allData=[], currentPage=1;
-const adultPatterns=[/porn|sex|xxx|xvideos|redtube|xnxx|pornhub|youporn|hentai/i];
-function favicon(domain){
-  const base=domain.replace(/^www\./,'').split('/')[0];
-  return `<img class="favicon" src="https://www.google.com/s2/favicons?domain=${base}">`;
-}
-function describeDomain(domain,ctx){
-  const basic={youtube:"Vídeos",tiktok:"Vídeos cortos",twitter:"Red social",instagram:"Fotos",facebook:"Red social",netflix:"Streaming",disney:"Disney+",amazon:"Compras"};
-  for(const k in basic){if(domain.includes(k))return basic[k];}
-  if(ctx&&ctx.includes("tiktok"))return"Accedido desde TikTok";
-  return"Sitio web";
-}
-function parseTS(raw){
-  const offset=document.getElementById('tzOffset')?.valueAsNumber||0;
-  return new Date(new Date(raw).getTime() + offset*60*60*1000);
-}
-function matchesFilters(row){
-  const st=document.getElementById('startTime').valueAsNumber;
-  const et=document.getElementById('endTime').valueAsNumber;
-  const df=document.getElementById('domainFilter').value.toLowerCase();
-  const devf=document.getElementById('deviceFilter').value.toLowerCase();
-  const t=row.ts.getTime();
-  if(st&&t<st)return false;
-  if(et&&t>et)return false;
-  if(df&&!row.domain.toLowerCase().includes(df))return false;
-  if(devf&&!row.device.toLowerCase().includes(devf))return false;
-  return true;
-}
-function paginateData(data,page,size){
-  const start=(page-1)*size;
-  return data.slice(start,start+size);
-}
-function renderPagination(total,size){
-  const pages=Math.ceil(total/size);
-  let html='';
-  for(let i=1;i<=pages;i++){
-    html+=`<button onclick="gotoPage(${i})"${i===currentPage?' style="background:#007bff;color:white"':''}>${i}</button>`;
+(function(){
+  let allData=[], currentPage=1;
+
+  const adultPatterns=[/porn|sex|xxx|xvideos|redtube|xnxx|pornhub|youporn|hentai/i];
+
+  function getHostFromUrl(url){
+    try{ return new URL(url).host; }catch(_){ return ''; }
   }
-  document.getElementById('pagination').innerHTML=html;
-}
-function renderTable(){
-  const showIP=document.getElementById('showIP').checked;
-  const showDesc=document.getElementById('descToggle').checked;
-  const mode=document.getElementById('descMode').value;
-  const size=parseInt(document.getElementById('pageSize').value)||500;
-  const filtered=allData.filter(matchesFilters);
-  const paginated=paginateData(filtered,currentPage,size);
-  renderPagination(filtered.length,size);
-  let html=`<tr><th>Hora</th><th>Dominio</th><th>Dispositivo</th>${showIP?'<th>IP</th>':''}${showDesc?'<th>Descripción</th>':''}<th>▶︎</th></tr>`;
-  paginated.forEach(row=>{
-    const adult=adultPatterns.some(p=>p.test(row.domain));
-    const desc=showDesc?describeDomain(row.domain,row.ctx):'';
-    html+=`<tr data-idx="${row._idx}" class="${adult?'adult':''}">
-      <td>${row.ts.toLocaleString()}</td>
-      <td class="domain-cell">${favicon(row.domain)}${row.domain}</td>
-      <td>${row.device}</td>
-      ${showIP?`<td>${row.ip}</td>`:''}
-      ${showDesc?`<td>${desc}</td>`:''}
-      <td style="text-align:center"><button onclick="toggleContext(event,${row._idx})">🕵️</button></td>
+
+  function favicon(host){
+    const base=(host||'').replace(/^https?:\\/\\//,'').replace(/^www\\./,'').split('/')[0];
+    return `<img class="favicon" src="https://www.google.com/s2/favicons?domain=${base}" alt="">`;
+  }
+
+  function parseTS(raw){
+    const off=parseFloat(document.getElementById('tzOffset').value||'0')||0;
+    const d=raw?new Date(raw):new Date();
+    return new Date(d.getTime()+off*3600000);
+  }
+
+  function describe(host){
+    const s=(host||'').toLowerCase();
+    if(s.includes('tinder')) return 'Citas';
+    if(s.includes('facebook')) return 'Red social';
+    if(s.includes('instagram')) return 'Fotos';
+    if(s.includes('twitter')||s==='x.com') return 'Red social';
+    if(s.includes('youtube')) return 'Vídeos';
+    if(s.includes('netflix')) return 'Streaming';
+    return 'Sitio web';
+  }
+
+  function matchesFilters(row){
+    const st=document.getElementById('startTime').valueAsNumber;
+    const et=document.getElementById('endTime').valueAsNumber;
+    const df=(document.getElementById('domainFilter').value||'').toLowerCase();
+    const dev=(document.getElementById('deviceFilter').value||'').toLowerCase();
+
+    const t=row.ts.getTime();
+    if(st && t<st) return false;
+    if(et && t>et) return false;
+    if(df && !(row.display.toLowerCase().includes(df) || row.host.toLowerCase().includes(df))) return false;
+    if(dev && !row.device.toLowerCase().includes(dev)) return false;
+    return true;
+  }
+
+  function paginate(arr,page,size){
+    const start=(page-1)*size;
+    return arr.slice(start,start+size);
+  }
+
+  function renderPaginationTop(total,size){
+    const pages=Math.max(1,Math.ceil(total/size));
+    if(currentPage>pages) currentPage=pages;
+    const prevDisabled=currentPage<=1?'disabled':'';
+    const nextDisabled=currentPage>=pages?'disabled':'';
+    document.getElementById('paginationTop').innerHTML =
+      `<button ${prevDisabled} onclick="gotoRel(-1)">Pág anterior</button>
+       <span class="muted">Página ${currentPage} de ${pages}</span>
+       <button ${nextDisabled} onclick="gotoRel(1)">Página siguiente</button>`;
+  }
+
+  function renderPaginationBottom(total,size){
+    const pages=Math.max(1,Math.ceil(total/size));
+    let html='';
+    for(let i=1;i<=pages;i++){
+      html+=`<button onclick="gotoPage(${i})"${i===currentPage?' style="font-weight:bold;text-decoration:underline"':''}>${i}</button>`;
+    }
+    document.getElementById('paginationBottom').innerHTML=html;
+  }
+
+  function renderTable(){
+    const showIP=document.getElementById('showIP').checked;
+    const showDesc=document.getElementById('descToggle').checked;
+    const size=parseInt(document.getElementById('pageSize').value,10)||500;
+
+    const filtered=allData.filter(matchesFilters);
+    const paginated=paginate(filtered,currentPage,size);
+
+    renderPaginationTop(filtered.length,size);
+    renderPaginationBottom(filtered.length,size);
+
+    let html=`<tr>
+      <th>Hora</th>
+      <th>URL / Dominio (exacto del registro)</th>
+      <th>Dispositivo</th>
+      ${showIP?'<th>IP</th>':''}
+      ${showDesc?'<th>Descripción</th>':''}
+      <th>▶︎</th>
     </tr>`;
-  });
-  document.getElementById('logTable').innerHTML=html;
-}
-function toggleContext(e,idx){
-  e.stopPropagation();
-  const table=document.getElementById('logTable');
-  const rows=Array.from(table.rows);
-  const rowIndex=rows.findIndex(r=>r.dataset.idx==idx);
-  if(rowIndex===-1)return;
-  const next=rows[rowIndex+1];
-  if(next&&next.classList.contains('context-row')){next.remove();return;}
-  const start=Math.max(0,idx-50);
-  const end=Math.min(allData.length,idx+51);
-  const slice=allData.slice(start,end);
-  let ctxHTML='<tr class="context-row"><td colspan="100%">';
-  slice.forEach(r=>{ctxHTML+=`${r.ts.toLocaleString()} - ${r.domain}<br>`;});
-  ctxHTML+='</td></tr>';
-  rows[rowIndex].insertAdjacentHTML('afterend',ctxHTML);
-}
-function gotoPage(n){currentPage=n;renderTable();}
-document.getElementById('filterBtn').addEventListener('click',()=>{currentPage=1;renderTable()});
-document.getElementById('fileInput').addEventListener('change',e=>{
-  const f=e.target.files[0];if(!f)return;allData=[];
-  Papa.parse(f,{header:true,skipEmptyLines:true,step:res=>{
-    const d=res.data;allData.push({
-      _idx:allData.length,
-      ts:parseTS(d.timestamp||d.time||d.date||d.timeStamp),
-      domain:(d.root_domain||d.domain||'').trim(),
-      device:(d.device_name||d.device_model||'').trim(),
-      ip:(d.client_ip||d.ip||'').trim(),
-      ctx:(d.root_domain||'').toLowerCase()
+
+    paginated.forEach(r=>{
+      const adult=adultPatterns.some(p=>p.test(r.host));
+      html+=`<tr data-idx="${r._idx}" class="${adult?'adult':''}">
+        <td>${r.ts.toLocaleString()}</td>
+        <td class="domain-cell">${favicon(r.host)}<span title="${r.display}">${r.display}</span></td>
+        <td>${r.device}</td>
+        ${showIP?`<td>${r.ip}</td>`:''}
+        ${showDesc?`<td>${describe(r.host)}</td>`:''}
+        <td style="text-align:center"><button onclick="toggleContext(event,${r._idx})">🕵️</button></td>
+      </tr>`;
     });
-  },complete:()=>{currentPage=1;renderTable();}});
-});
-</script>
+    document.getElementById('logTable').innerHTML=html;
+  }
+
+  window.gotoPage=function(n){ currentPage=n; renderTable(); }
+  window.gotoRel=function(d){ currentPage=Math.max(1,currentPage+d); renderTable(); }
+
+  window.toggleContext=function(ev,idx){
+    ev.stopPropagation();
+    const table=document.getElementById('logTable');
+    const rows=Array.from(table.rows);
+    const i=rows.findIndex(r=>r.dataset.idx==idx);
+    if(i===-1) return;
+    const next=rows[i+1];
+    if(next && next.classList.contains('context-row')){ next.remove(); return; }
+    const start=Math.max(0,idx-50), end=Math.min(allData.length,idx+51);
+    const slice=allData.slice(start,end);
+    let ctx='<tr class="context-row"><td colspan="100%">';
+    slice.forEach(r=>{ ctx+=`${r.ts.toLocaleString()} - ${r.display}<br>`; });
+    ctx+='</td></tr>';
+    rows[i].insertAdjacentHTML('afterend',ctx);
+  }
+
+  // Botón Filtrar y tecla Enter
+  document.getElementById('filterBtn').addEventListener('click',()=>{ currentPage=1; renderTable(); });
+  document.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); document.getElementById('filterBtn').click(); }
+  });
+
+  // Cargar CSV
+  document.getElementById('fileInput').addEventListener('change', (e)=>{
+    const f=e.target.files[0]; if(!f) return;
+    allData=[]; currentPage=1;
+    Papa.parse(f,{
+      header:true, skipEmptyLines:true,
+      step: ({data:d})=>{
+        const urlFull=(d.url||d.request_url||d.full_url||d.uri||d.path||'').toString().trim();
+        const hostRaw=(d.domain||d.host||d.hostname||d.request_host||'').toString().trim();
+        const root=(d.root_domain||d.eTLDplus1||'').toString().trim();
+        const display = urlFull || hostRaw || root || '(sin dato)'; // lo que ve el usuario (exacto del CSV)
+        const host = hostRaw || getHostFromUrl(urlFull) || root || ''; // para favicon y detecciones
+        const device=(d.device_name||d.device||d.device_model||'').toString().trim();
+        const ip=(d.client_ip||d.ip||'').toString().trim();
+        const ts=parseTS(d.timestamp||d.time||d.date||d.timeStamp);
+
+        allData.push({_idx:allData.length, display, host, device, ip, ts});
+      },
+      complete: ()=> renderTable()
+    });
+  });
+})();</script>
 </body>
 </html>
