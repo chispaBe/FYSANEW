@@ -2,10 +2,10 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cursos Fysa</title>
-  <!-- Sin atributo integrity para evitar bloqueo por SRI en GitHub Pages si cambia el hash -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- PapaParse SIN integrity y con defer para evitar bloqueos / orden de carga -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     :root{--bg:#f6f7fb;--card:#fff;--line:#ddd;--muted:#666}
     *{box-sizing:border-box}
@@ -13,7 +13,7 @@
     h1{margin:0 0 12px;text-align:center}
     .panel{background:var(--card);padding:12px;border:1px solid var(--line);border-radius:10px}
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .pager{display:flex;gap:10px;align-items:center}
+    .pager{display:flex;gap:10px;align-items:center;justify-content:center}
     .pager button{padding:6px 10px;cursor:pointer}
     .muted{color:var(--muted)}
     .filters{margin:12px 0}
@@ -37,9 +37,13 @@
 
   <div id="error"></div>
 
-  <!-- Paginación superior: solo anterior/siguiente -->
+  <!-- Paginación superior SIEMPRE visible -->
   <div class="panel">
-    <div id="paginationTop" class="row pager"></div>
+    <div id="paginationTop" class="row pager">
+      <button disabled>Pág anterior</button>
+      <span class="muted" id="pageInfo">Página 0 de 0</span>
+      <button disabled>Página siguiente</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -68,7 +72,8 @@
     <div id="paginationBottom" class="pagination"></div>
   </div>
 
-<script>
+<script defer>
+// Se asegura de ejecutarse tras PapaParse
 (function(){
   let allData=[], currentPage=1;
 
@@ -77,10 +82,6 @@
     box.textContent=msg;
     box.style.display='block';
     console.error(msg);
-  }
-
-  if(typeof Papa==='undefined'){
-    showError('No se pudo cargar la librería para leer CSV (PapaParse). Revisa tu conexión o desactiva bloqueadores y refresca.');
   }
 
   const adultPatterns=[/porn|sex|xxx|xvideos|redtube|xnxx|pornhub|youporn|hentai/i];
@@ -95,9 +96,26 @@
   }
 
   function parseTS(raw){
+    // aceptar varios formatos comunes
     const off=parseFloat(document.getElementById('tzOffset').value||'0')||0;
-    const d=raw?new Date(raw):new Date();
+    let d;
+    if(!raw){ d=new Date(); }
+    else if(typeof raw==='number'){ d=new Date(raw); }
+    else{
+      const s=String(raw).replace(/\\//g,'-'); // por si viene dd/mm/aaaa
+      d=new Date(s);
+    }
     return new Date(d.getTime()+off*3600000);
+  }
+
+  function getFirst(obj, keys){
+    for(const k of keys){
+      if(k in obj && obj[k]!=null && String(obj[k]).trim()!=='') return String(obj[k]).trim();
+      // variantes en mayúsculas
+      const alt = Object.keys(obj).find(x => x.toLowerCase()===k.toLowerCase());
+      if(alt && String(obj[alt]).trim()!=='') return String(obj[alt]).trim();
+    }
+    return '';
   }
 
   function matchesFilters(row){
@@ -120,23 +138,23 @@
   }
 
   function renderPaginationTop(total,size){
-    const pages=Math.max(1,Math.ceil(total/size));
+    const pages=Math.max(1,Math.ceil(total/size || 1));
     if(currentPage>pages) currentPage=pages;
     const prevDisabled=currentPage<=1?'disabled':'';
     const nextDisabled=currentPage>=pages?'disabled':'';
     document.getElementById('paginationTop').innerHTML =
       `<button ${prevDisabled} onclick="gotoRel(-1)">Pág anterior</button>
-       <span class="muted">Página ${currentPage} de ${pages}</span>
+       <span class="muted" id="pageInfo">Página ${total?currentPage:0} de ${total?pages:0}</span>
        <button ${nextDisabled} onclick="gotoRel(1)">Página siguiente</button>`;
   }
 
   function renderPaginationBottom(total,size){
-    const pages=Math.max(1,Math.ceil(total/size));
+    const pages=Math.max(1,Math.ceil(total/size || 1));
     let html='';
     for(let i=1;i<=pages;i++){
       html+=`<button onclick="gotoPage(${i})"${i===currentPage?' style="font-weight:bold;text-decoration:underline"':''}>${i}</button>`;
     }
-    document.getElementById('paginationBottom').innerHTML=html;
+    document.getElementById('paginationBottom').innerHTML= total ? html : '';
   }
 
   function renderTable(){
@@ -161,12 +179,23 @@
 
     paginated.forEach(r=>{
       const adult=adultPatterns.some(p=>p.test(r.host));
+      const desc=(function(h){
+        const s=(h||'').toLowerCase();
+        if(s.includes('tinder')) return 'Citas';
+        if(s.includes('facebook')) return 'Red social';
+        if(s.includes('instagram')) return 'Fotos';
+        if(s.includes('twitter')||s==='x.com') return 'Red social';
+        if(s.includes('youtube')) return 'Vídeos';
+        if(s.includes('netflix')) return 'Streaming';
+        return 'Sitio web';
+      })(r.host);
+
       html+=`<tr data-idx="${r._idx}" class="${adult?'adult':''}">
         <td>${r.ts.toLocaleString()}</td>
         <td class="domain-cell">${favicon(r.host)}<span title="${r.display}">${r.display}</span></td>
         <td>${r.device}</td>
         ${showIP?`<td>${r.ip}</td>`:''}
-        ${showDesc?`<td>${r.desc}</td>`:''}
+        ${showDesc?`<td>${desc}</td>`:''}
         <td style="text-align:center"><button onclick="toggleContext(event,${r._idx})">🕵️</button></td>
       </tr>`;
     });
@@ -198,31 +227,33 @@
     if(e.key==='Enter'){ e.preventDefault(); document.getElementById('filterBtn').click(); }
   });
 
+  // Render inicial (para que se vea la paginación arriba)
+  renderTable();
+
   // Cargar CSV
   document.getElementById('fileInput').addEventListener('change', (e)=>{
     const f=e.target.files[0]; if(!f) return;
-    if(typeof Papa==='undefined'){ showError('PapaParse no está disponible, no puedo leer CSV.'); return; }
+    if(typeof Papa==='undefined'){ showError('No se pudo cargar la librería para leer CSV (PapaParse).'); return; }
     allData=[]; currentPage=1;
     Papa.parse(f,{
       header:true, skipEmptyLines:true,
-      step: ({data:d})=>{
-        const urlFull=(d.url||d.request_url||d.full_url||d.uri||d.path||'').toString().trim();
-        const hostRaw=(d.domain||d.host||d.hostname||d.request_host||'').toString().trim();
-        const root=(d.root_domain||d.eTLDplus1||'').toString().trim();
-        const display = urlFull || hostRaw || root || '(sin dato)'; // lo que ve el usuario (exacto del CSV)
-        const host = hostRaw || getHostFromUrl(urlFull) || root || ''; // para favicon y detecciones
-        const device=(d.device_name||d.device||d.device_model||'').toString().trim();
-        const ip=(d.client_ip||d.ip||'').toString().trim();
-        const ts=parseTS(d.timestamp||d.time||d.date||d.timeStamp);
-        const desc=(()=>{
-          const s=(host||'').toLowerCase();
-          if(s.includes('tinder')) return 'Citas'; if(s.includes('facebook')) return 'Red social';
-          if(s.includes('instagram')) return 'Fotos'; if(s.includes('twitter')||s==='x.com') return 'Red social';
-          if(s.includes('youtube')) return 'Vídeos'; if(s.includes('netflix')) return 'Streaming';
-          return 'Sitio web';
-        })();
+      // delimiter: ""  -> Papa detecta automáticamente ; o , 
+      step: ({data})=>{
+        const urlFull = getFirst(data, ['url','request_url','full_url','uri','path','request']);
+        const hostRaw = getFirst(data, ['domain','host','hostname','request_host','fqdn']);
+        const root    = getFirst(data, ['root_domain','eTLDplus1']);
+        const device  = getFirst(data, ['device_name','device','device_model']);
+        const ip      = getFirst(data, ['client_ip','ip']);
+        const timeVal = getFirst(data, ['timestamp','time','date','timeStamp','fecha','hora']);
 
-        allData.push({_idx:allData.length, display, host, device, ip, ts, desc});
+        const display = urlFull || hostRaw || root || '(sin dato)'; // lo que ve el usuario
+        const host    = hostRaw || getHostFromUrl(urlFull) || root || '';
+
+        allData.push({
+          _idx: allData.length,
+          display, host, device, ip,
+          ts: parseTS(timeVal)
+        });
       },
       error: (err)=> showError('Error leyendo el CSV: '+(err && err.message? err.message : String(err))),
       complete: ()=> renderTable()
